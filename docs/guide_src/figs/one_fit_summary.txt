@@ -1,0 +1,5 @@
+D_x   = 0.278 +/- 0.02 um^4/s   (7.3%)
+s_bar = 0.00090578 +/- 5.7e-06      (0.09058% +/- 0.00057 percentage points)
+correlation between the two estimates: -0.84
+fit check: J_min = 77.4, expected about 90 +/- 13 -> consistent with the model
+(100000 droplets, 4 iterations)

@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ipynb_checkpoints/
+.venv/
+venv/
+
+# LaTeX build files
+docs/guide_src/*.aux
+docs/guide_src/*.log
+docs/guide_src/*.toc
+docs/guide_src/*.out
+docs/guide_src/*.synctex.gz
