@@ -21,6 +21,8 @@ pip install -e ".[notebook]"
 
 This installs `dsdfit` with numpy, scipy, matplotlib and Jupyter. Then open `examples/example.ipynb`.
 
+`examples/codt_first_look.ipynb` fits droplet size distributions from C-ODT simulations and compares the results with C-ODT's supersaturation statistics. The C-ODT output is not included in this repository, and reading it needs `netCDF4` (`pip install -e ".[codt]"`).
+
 ## Quick start
 
 ```python
