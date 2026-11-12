@@ -101,6 +101,19 @@ where $a$ is a \emph{growth constant} set by the temperature and pressure, and $
 correction from salt and curvature that only matters for the smallest droplets. Notice that it is the
 \emph{square} of the radius that grows at a steady rate. That is why the model works with $x = r^2$.
 
+\paragraph{Small droplets grow a little more slowly (optional).} Right at a droplet's surface, vapor and
+heat are exchanged molecule by molecule, and not every vapor molecule that hits the surface sticks. This
+slows small droplets by a factor $r/(r+\ell)$. The \emph{kinetic length} $\ell$ is set by two
+\emph{accommodation coefficients}: $\alpha_c$, the fraction of vapor molecules that stick, and $\alpha_T$,
+how well heat is passed to the air. By default dsdfit leaves this out ($\ell = 0$). To include it, give the
+coefficients: \code{Conditions(alpha\_c=0.04, alpha\_T=1.0)} uses C-ODT's values, which give
+$\ell \approx 1.5\um$ at 288\,K. Equation~\eqref{eq:growth} then becomes
+\begin{equation*}
+\frac{d(r+\ell)^2}{dt} = a\,\big(s - s_{\rm eq}(r)\big),
+\end{equation*}
+so the model works with $y = (r+\ell)^2$ instead of $r^2$, and nothing else changes. In particular,
+$\Dx \approx a^2\sigma_s^2\tau$ still holds, now as the spreading of $y$.
+
 \paragraph{Turbulence spreads sizes apart.} In turbulent air the supersaturation fluctuates around its mean
 $\sbar$. The size of the fluctuations is measured by their standard deviation $\sigma_s$, and how long a
 typical fluctuation lasts by a time scale $\tau$. Each droplet experiences its own random sequence of
@@ -146,7 +159,8 @@ Fokker--Planck equation is
 \end{equation}
 \end{mathbox}
 The bracket is the rate at which droplets move toward larger sizes. Droplets are injected at the smallest
-size and none go past the largest. You will not need to solve this yourself; dsdfit does it.
+size and none go past the largest. With the kinetic correction, $x$ is replaced by $y = (r+\ell)^2$; the
+fallout term stays $k r^2 N$. You will not need to solve this yourself; dsdfit does it.
 
 \paragraph{The parameters.} Table~\ref{tab:params} lists everything that enters. The first two are
 estimated; the next two are what C-ODT can provide for the comparison; the rest you set to match your
@@ -168,13 +182,16 @@ $T$ & air temperature & K & 288 & \code{Conditions(T=...)} \\
 $p$ & air pressure & Pa & $1.0\times10^5$ & \code{Conditions(p=...)} \\
 $d_{\rm dry}$ & diameter of the dry salt particle & $\upmu$m & 0.13 & \code{Conditions(d\_dry=...)} \\
 $H$ & chamber height & m & 1 & \code{Conditions(H=...)} \\
+$\alpha_c$, $\alpha_T$ & accommodation coefficients (optional) & fraction & 0.04, 1 & \code{Conditions(alpha\_c=...)} \\
 \midrule
 $a$ & growth constant & $\upmu$m$^2$/s & 206 & computed (\code{cond.a}) \\
 $A_k$, $B_k$ & curvature and salt constants & $\upmu$m, $\upmu$m$^3$ & & computed \\
 $k$ & fallout constant & s$^{-1}\upmu$m$^{-2}$ & $1.2\times10^{-4}$ & computed (\code{cond.k}) \\
+$\ell$ & kinetic length & $\upmu$m & 0 & computed (\code{cond.ell}) \\
 \bottomrule
 \end{tabularx}
-\caption{The parameters. Example values are the defaults used in this guide.}
+\caption{The parameters. Example values are the defaults used in this guide. The accommodation coefficients
+are not set by default ($\ell = 0$); 0.04 and 1 are C-ODT's values.}
 \label{tab:params}
 \end{table}
 
@@ -264,7 +281,7 @@ Then open \code{examples/example.ipynb}, which walks through everything in this 
 \toprule
 Function & What it does \\
 \midrule
-\code{Conditions(T, p, d\_dry, H)} & physical conditions; computes $a$, $A_k$, $B_k$, $k$ (\code{print(cond)} shows them) \\
+\code{Conditions(T, p, d\_dry, H, alpha\_c, alpha\_T)} & physical conditions; computes $a$, $A_k$, $B_k$, $k$, $\ell$ (\code{print(cond)} shows them) \\
 \code{welas\_bins(cutoff\_diameter=1.0)} & bin edges of the WELAS instrument: 103 bins from 1 to 40\um \\
 \code{Histogram(edges, counts)} & droplet counts in size bins (Section~\ref{sec:format}) \\
 \code{load\_histogram(path)}, \code{save\_histogram(h, path)} & read and write histograms as CSV files \\
@@ -376,7 +393,8 @@ period).
 sizes. Make sure each count is a number of droplets, and think about whether the same droplets appear in
 several of the snapshots you combine.
 \item \textbf{Set the conditions.} Use the run's temperature, pressure, dry particle size and domain
-height. Check how C-ODT removes droplets: dsdfit assumes they fall out at rate $k r^2$, with $k$ set by the
+height. C-ODT includes the kinetic correction with $\alpha_c = 0.04$ and $\alpha_T = 1$, so pass those too.
+Check how C-ODT removes droplets: dsdfit assumes they fall out at rate $k r^2$, with $k$ set by the
 chamber height.
 \item \textbf{Fit.} Look at the estimates, the error bars, and the fit check. Plot the histogram with the
 fitted model.
@@ -399,6 +417,8 @@ $\Dx$, in units of the error bar. Also compare the fitted $\sbar$ with C-ODT's m
 \paragraph{If they disagree.} Some possible reasons, each worth checking:
 \begin{itemize}
 \item the conditions do not match the run (especially anything affecting growth or fallout);
+\item the histogram includes particles that have not activated, which the model's spreading term cannot
+describe (with 0.13\um\ salt particles, activation happens near 2\um\ diameter; try \code{welas\_bins(3.0)});
 \item the period is not steady, or the counts are not independent (error bars too small);
 \item C-ODT injects or removes droplets differently from the model;
 \item the fluctuations last too long for $\Dx \approx a^2\sigma_s^2\tau$ to hold (it needs $\tau$ short
@@ -452,7 +472,7 @@ counts $c_k$ in bins $k = 1,\dots,K$, with $n = \sum_k c_k$ droplets; $p_k(\thet
 in bin $k$; and $\theta = (\ln\Dx, \sbar)$.
 
 \paragraph{Solving the model.} Equation~\eqref{eq:fp} is solved with finite volumes on a fine, uniform grid
-in $x = r^2$, using Scharfetter--Gummel fluxes, which stay accurate whether growth or spreading dominates.
+in $y = (r+\ell)^2$ (that is, $x = r^2$ when $\ell = 0$), using Scharfetter--Gummel fluxes, which stay accurate whether growth or spreading dominates.
 The result is one tridiagonal linear system. The solution is summed over each bin and normalized to give
 $p_k$.
 
@@ -473,7 +493,8 @@ n\,\Ical\,\Delta\theta = \sum_k \frac{c_k - n p_k}{p_k}\,\frac{\partial p_k}{\pa
 \qquad
 \Ical_{ij} = \sum_k \frac{1}{p_k}\,\frac{\partial p_k}{\partial\theta_i}\,\frac{\partial p_k}{\partial\theta_j},
 \end{equation}
-and moves to $\theta + \Delta\theta$, halving the step if $J$ does not go down. This is the step that would
+and moves to $\theta + \Delta\theta$, halving the step if $J$ does not go down (a very long step is first
+shortened, keeping its direction). This is the step that would
 fit the current mismatch exactly if the model were linear near $\theta$. It usually converges in a handful
 of steps. The derivatives $\partial p_k/\partial\theta$ come from two more solves of the same tridiagonal
 system (the \emph{tangent-linear} method).

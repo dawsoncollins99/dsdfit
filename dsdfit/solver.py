@@ -3,14 +3,19 @@
 Most users never call this module directly: ``model_fractions``, ``simulate`` and
 ``fit`` use it for you.
 
-The model, in x = r^2 (radius squared, um^2):
+The model, in y = (r + ell)^2 (um^2), where ell is the kinetic length from
+``Conditions`` (ell = 0 by default, so y = r^2, radius squared):
 
-    d/dx [ v(x) N - D_x dN/dx ] + k x N = 0,      v(x) = a (s_bar - A_k / r + B_k / r^3)
+    d/dy [ v N - D_x dN/dy ] + k r^2 N = 0,      v = a (s_bar - A_k / r + B_k / r^3),   r = sqrt(y) - ell
 
 with droplets injected at the smallest size (flux F_in = 1) and no flux at the
-largest size. It is solved with finite volumes on a uniform grid in x, using
-Scharfetter-Gummel fluxes (as in Steve Krueger's MATLAB solver); the result is a
-tridiagonal linear system.
+largest size. Working in y keeps the equation in the same form with the kinetic
+correction: a droplet grows as dy/dt = a (s - s_eq(r)), so supersaturation
+fluctuations still spread y with a constant D_x = a^2 sigma_s^2 tau.
+
+It is solved with finite volumes on a uniform grid in y, using Scharfetter-Gummel
+fluxes (as in Steve Krueger's MATLAB solver); the result is a tridiagonal linear
+system.
 
 ``Model.fractions_and_sensitivities`` also returns how each bin's fraction changes
 with ln(D_x) and s_bar (tangent-linear method: the same tridiagonal matrix with a
@@ -20,7 +25,7 @@ from functools import lru_cache
 import numpy as np
 from scipy.linalg import solve_banded
 
-CELL_WIDTH = 0.007     # target width of one grid cell in x = r^2 [um^2]
+CELL_WIDTH = 0.007     # target width of one grid cell in y = (r + ell)^2 [um^2]
 R_MAX_MIN = 30.0       # the grid always extends at least to this radius [um]
 MAX_CELLS = 2_000_000
 
@@ -76,21 +81,23 @@ class Model:
         if r_edges[0] <= r_min:
             raise ValueError("The smallest bin edge must be larger than half the dry particle diameter.")
         r_max = max(R_MAX_MIN, 1.5 * r_edges[-1])
-        n_cells = int(np.ceil((r_max**2 - r_min**2) / CELL_WIDTH))
+        ell = cond.ell
+        self.ell = ell
+        n_cells = int(np.ceil(((r_max + ell)**2 - (r_min + ell)**2) / CELL_WIDTH))
         if n_cells > MAX_CELLS:
             raise ValueError(f"The largest bin edge ({2 * r_edges[-1]:g} um) needs too fine a grid. "
                              "Drop bins well beyond the largest droplets.")
         self.n_cells = n_cells
-        self.xf = np.linspace(r_min**2, r_max**2, n_cells + 1)    # cell faces [um^2]
-        self.dx = self.xf[1] - self.xf[0]
-        self.xc = 0.5 * (self.xf[:-1] + self.xf[1:])               # cell centers [um^2]
-        self.rc = np.sqrt(self.xc)
+        self.yf = np.linspace((r_min + ell)**2, (r_max + ell)**2, n_cells + 1)   # cell faces [um^2]
+        self.dy = self.yf[1] - self.yf[0]
+        self.yc = 0.5 * (self.yf[:-1] + self.yf[1:])                            # cell centers [um^2]
+        self.rc = np.sqrt(self.yc) - ell                                          # cell-center radii [um]
 
         # which cells lie in which bin (cells cut by a bin edge are split by length)
-        xe = r_edges**2
-        j = np.clip(np.floor((xe - self.xf[0]) / self.dx).astype(int), 0, n_cells - 1)
+        ye = (r_edges + ell)**2
+        j = np.clip(np.floor((ye - self.yf[0]) / self.dy).astype(int), 0, n_cells - 1)
         self._j = j
-        self._f = np.clip((xe - self.xf[j]) / self.dx, 0.0, 1.0)
+        self._f = np.clip((ye - self.yf[j]) / self.dy, 0.0, 1.0)
         self.n_bins = len(r_edges) - 1
 
     # ---- the tridiagonal system
@@ -98,10 +105,10 @@ class Model:
         c = self.cond
         v_center = c.a * (s_bar - c.A_k / self.rc + c.B_k / self.rc**3)   # drift [um^2/s]
         v_face = 0.5 * (v_center[:-1] + v_center[1:])
-        Pe = v_face * self.dx / D_x                                         # cell Peclet number
-        alpha = (D_x / self.dx) * _bern(-Pe)
-        beta = -(D_x / self.dx) * _bern(Pe)
-        diag = c.k * self.xc * self.dx                                      # fallout
+        Pe = v_face * self.dy / D_x                                         # cell Peclet number
+        alpha = (D_x / self.dy) * _bern(-Pe)
+        beta = -(D_x / self.dy) * _bern(Pe)
+        diag = c.k * self.rc**2 * self.dy                                   # fallout
         diag[:-1] += alpha
         diag[1:] -= beta
         ab = np.zeros((3, self.n_cells))
@@ -120,7 +127,7 @@ class Model:
                 out[b] = (fb - fa) * X[ja]
             else:
                 out[b] = (1 - fa) * X[ja] + X[ja + 1:jb].sum(axis=0) + fb * X[jb]
-        return out * self.dx
+        return out * self.dy
 
     def _check(self, D_x, s_bar):
         if not (np.isfinite(D_x) and D_x > 0):
@@ -129,12 +136,16 @@ class Model:
             raise ValueError(f"s_bar must be a finite number (got {s_bar!r}).")
 
     def density(self, D_x, s_bar):
-        """Droplet density N on the grid (unit injection). Returns (x centers, N)."""
+        """Droplet density on the grid (unit injection).
+
+        Returns (r, N): cell-center radii [um] and the number of droplets per unit
+        y = (r + ell)^2 in each cell (per unit r^2 when ell = 0).
+        """
         self._check(D_x, s_bar)
         ab, _ = self._assemble(D_x, s_bar)
         rhs = np.zeros(self.n_cells)
         rhs[0] = 1.0
-        return self.xc, solve_banded((1, 1), ab, rhs)
+        return self.rc, solve_banded((1, 1), ab, rhs)
 
     def fractions(self, D_x, s_bar):
         """Fraction of detected droplets expected in each bin."""
@@ -155,7 +166,7 @@ class Model:
 
         # derivatives of each face flux, holding N fixed
         w = 1.0 + _bern_prime(Pe)
-        dF_dlnD = (D_x / self.dx) * _diff_weight(Pe) * (N[:-1] - N[1:])
+        dF_dlnD = (D_x / self.dy) * _diff_weight(Pe) * (N[:-1] - N[1:])
         dF_ds = self.cond.a * (w * N[:-1] + (1 - w) * N[1:])
 
         def minus_divergence(q):

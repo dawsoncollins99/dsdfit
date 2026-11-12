@@ -41,7 +41,7 @@ plot_fit(hist, result)
 
 | Function | What it does |
 |---|---|
-| `Conditions(T, p, d_dry, H)` | physical conditions; computes the model constants |
+| `Conditions(T, p, d_dry, H, alpha_c, alpha_T)` | physical conditions; computes the model constants |
 | `welas_bins(cutoff_diameter=1.0)` | bin edges of the WELAS instrument |
 | `Histogram(edges, counts)` | droplet counts in size bins (the data format) |
 | `load_histogram(path)`, `save_histogram(hist, path)` | read and write histograms as CSV |
@@ -52,6 +52,8 @@ plot_fit(hist, result)
 | `plot_fit(hist, result)` | plot a histogram with the true and fitted model |
 
 **Conventions:** sizes you type are droplet **diameters in µm**; `D_x` is in µm⁴/s; `s_bar` is a fraction.
+
+**Slower growth of small droplets (optional).** Giving the accommodation coefficients, for example `Conditions(alpha_c=0.04, alpha_T=1.0)` (C-ODT's values), slows the growth of small droplets by a factor r/(r + ℓ), with a kinetic length ℓ ≈ 1.5 µm at 288 K. By default there is no such correction (ℓ = 0). With it, the model works with y = (r + ℓ)² instead of r², and `D_x ≈ a² σ_s² τ` still applies. Section 2 of the guide explains it.
 
 ## Histogram format
 

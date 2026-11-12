@@ -9,10 +9,16 @@ constants the model needs:
     B_k  solute constant         [um^3]        dissolved salt helps small droplets grow (Raoult effect)
     k    fallout constant        [1/(s um^2)]  droplets of radius r fall out at rate k * r^2
 
+Optionally, two accommodation coefficients (alpha_c, alpha_T) add a fifth constant:
+
+    ell  kinetic length          [um]          small droplets grow more slowly, by a factor r / (r + ell)
+
 The formulas follow Steve Krueger's MATLAB solver (xi1_func.m, esat_Pa.m and the
-benchmark script). The aerosol is sodium chloride (NaCl).
+benchmark script); the kinetic length follows Fukuta and Walter (1970), as in
+C-ODT. The aerosol is sodium chloride (NaCl).
 """
 from dataclasses import dataclass
+from typing import Optional
 import math
 
 # fixed physical constants (SI units)
@@ -28,6 +34,7 @@ R_VAP = 461.5         # gas constant of water vapor [J/(kg K)]
 L_V = 2.5e6           # latent heat of vaporization [J/kg]
 G = 9.81              # gravitational acceleration [m/s^2]
 MU_AIR = 1.8e-5       # dynamic viscosity of air [Pa s]
+C_V_AIR = 718.0       # specific heat of dry air at constant volume [J/(kg K)]
 T0 = 273.15           # 0 deg C in kelvin
 
 
@@ -53,19 +60,30 @@ class Conditions:
         Diameter of the dry salt particle each droplet forms on [um]. Default 0.13 um.
     H : float
         Height of the chamber [m]; sets how quickly droplets fall out. Default 1 m.
+    alpha_c : float or None
+        Condensation (mass) accommodation coefficient: the fraction of water vapor
+        molecules hitting a droplet that stick (0 < alpha_c <= 1). Default None,
+        meaning no kinetic correction (ell = 0), as in the original model.
+        C-ODT uses alpha_c = 0.04.
+    alpha_T : float
+        Thermal accommodation coefficient (0 < alpha_T <= 1). Only used when alpha_c
+        is given. Default 1, as in C-ODT.
 
-    The model constants are available as ``cond.a``, ``cond.A_k``, ``cond.B_k`` and ``cond.k``.
-    Use ``print(cond)`` to see all of them.
+    The model constants are available as ``cond.a``, ``cond.A_k``, ``cond.B_k``, ``cond.k``
+    and ``cond.ell``. Use ``print(cond)`` to see all of them.
 
     Examples
     --------
-    >>> cond = Conditions()                  # defaults
-    >>> cond = Conditions(T=285.0, H=1.2)    # change any of the four inputs
+    >>> cond = Conditions()                  # defaults (no kinetic correction)
+    >>> cond = Conditions(T=285.0, H=1.2)    # change any of the inputs
+    >>> cond = Conditions(alpha_c=0.04)      # include the kinetic correction, as in C-ODT
     """
     T: float = 288.0
     p: float = 1.0e5
     d_dry: float = 0.13
     H: float = 1.0
+    alpha_c: Optional[float] = None
+    alpha_T: float = 1.0
 
     def __post_init__(self):
         for name in ("T", "p", "d_dry", "H"):
@@ -75,18 +93,53 @@ class Conditions:
         if not 233.0 <= self.T <= 313.0:
             raise ValueError(f"Conditions: T = {self.T} K is outside the range the formulas are meant "
                              "for (about -40 to +40 deg C, i.e. 233-313 K).")
+        for name in ("alpha_c", "alpha_T"):
+            value = getattr(self, name)
+            if name == "alpha_c" and value is None:
+                continue
+            if not (isinstance(value, (int, float)) and math.isfinite(value) and 0 < value <= 1):
+                raise ValueError(f"Conditions: {name} must be a number between 0 and 1 (got {value!r}).")
+
+    # ------------------------------------------------------------------ air properties
+    def _conductivity(self):
+        """Thermal conductivity of air [W/(m K)]."""
+        return 7.7e-5 * (self.T - T0) + 0.02399
+
+    def _diffusivity(self):
+        """Diffusivity of water vapor in air [m^2/s]."""
+        return (1.57e-7 * (self.T - T0) + 2.211e-5) * 1e5 / self.p
+
+    def _resistances(self):
+        """The two resistances to growth: heat conduction (F_k) and vapor diffusion (F_d) [s/m^2]."""
+        T = self.T
+        F_k = (L_V / (R_VAP * T)) * L_V / (self._conductivity() * T)
+        F_d = R_VAP * T / (saturation_vapor_pressure(T) * self._diffusivity())
+        return F_k, F_d
 
     # ------------------------------------------------------------------ model constants
     @property
     def a(self):
-        """Growth constant [um^2/s]: a droplet grows as d(r^2)/dt = a * (s - s_eq)."""
-        T, p = self.T, self.p
-        K = 7.7e-5 * (T - T0) + 0.02399                      # thermal conductivity of air [W/(m K)]
-        D_v = (1.57e-7 * (T - T0) + 2.211e-5) * 1e5 / p      # diffusivity of water vapor [m^2/s]
-        denom = RHO_W * ((L_V / (R_VAP * T)) * L_V / (K * T)
-                         + R_VAP * T / (saturation_vapor_pressure(T) * D_v))
-        xi1 = 1e12 / denom                                    # dr/dt = xi1 * s / r  [um^2/s]
+        """Growth constant [um^2/s]: a droplet grows as d(r^2)/dt = a * (s - s_eq)
+        (or d(r + ell)^2/dt = a * (s - s_eq) with the kinetic correction)."""
+        F_k, F_d = self._resistances()
+        xi1 = 1e12 / (RHO_W * (F_k + F_d))                    # dr/dt = xi1 * s / r  [um^2/s]
         return 2.0 * xi1
+
+    @property
+    def ell(self):
+        """Kinetic length [um]: with it, droplets grow as dr/dt = (a/2) (s - s_eq) / (r + ell).
+
+        It is a weighted average of the vapor and heat "jump lengths" set by the
+        accommodation coefficients (Fukuta and Walter 1970). It is 0 when alpha_c is None.
+        """
+        if self.alpha_c is None:
+            return 0.0
+        T, p = self.T, self.p
+        jump_vapor = math.sqrt(2.0 * math.pi / (R_VAP * T)) * self._diffusivity() / self.alpha_c
+        jump_heat = (self._conductivity() * math.sqrt(2.0 * math.pi * R_AIR * T)
+                     / (self.alpha_T * p * (C_V_AIR + R_AIR / 2.0)))
+        F_k, F_d = self._resistances()
+        return (F_d * jump_vapor + F_k * jump_heat) / (F_d + F_k) * 1e6
 
     @property
     def A_k(self):
@@ -118,17 +171,23 @@ class Conditions:
         return math.sqrt(4.0 * self.A_k**3 / (27.0 * self.B_k))
 
     def __str__(self):
+        if self.alpha_c is None:
+            accommodation = ["  accommodation: none given (no kinetic correction)"]
+        else:
+            accommodation = [f"  accommodation alpha_c = {self.alpha_c:g}, alpha_T = {self.alpha_T:g}"]
         return "\n".join([
             "Conditions",
             f"  temperature  T     = {self.T:g} K",
             f"  pressure     p     = {self.p:g} Pa",
             f"  dry diameter d_dry = {self.d_dry:g} um",
             f"  chamber      H     = {self.H:g} m",
+            *accommodation,
             "Model constants",
             f"  growth       a     = {self.a:.4g} um^2/s",
             f"  curvature    A_k   = {self.A_k:.4g} um",
             f"  solute       B_k   = {self.B_k:.4g} um^3",
             f"  fallout      k     = {self.k:.4g} 1/(s um^2)",
+            f"  kinetic      ell   = {self.ell:.4g} um",
             f"  critical supersaturation = {self.critical_supersaturation:.4g} "
             f"({100 * self.critical_supersaturation:.3g}%)",
         ])

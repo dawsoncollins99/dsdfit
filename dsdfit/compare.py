@@ -21,5 +21,7 @@ def predicted_D_x(sigma_s, tau, cond):
 
     This relation holds when the fluctuations are short-lived compared with the
     time a droplet takes to grow. See the guide for how to compute sigma_s and tau.
+    It applies unchanged with the kinetic correction (``Conditions(alpha_c=...)``),
+    where D_x is the spreading of y = (r + ell)^2 rather than r^2.
     """
     return cond.a**2 * sigma_s**2 * tau

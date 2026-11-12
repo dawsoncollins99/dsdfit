@@ -1,10 +1,12 @@
 """Best case: the same model makes and fits the data. The truth must be recovered."""
 import numpy as np
+import pytest
 from dsdfit import Conditions, welas_bins, simulate, fit
 
 
-def test_recovery_best_case():
-    cond, edges = Conditions(), welas_bins()
+@pytest.mark.parametrize("alpha_c", [None, 0.04])
+def test_recovery_best_case(alpha_c):
+    cond, edges = Conditions(alpha_c=alpha_c), welas_bins()
     zD, zS = [], []
     for seed in range(10):
         h = simulate(0.3, 0.0009, cond, edges, n=10**5, seed=seed)

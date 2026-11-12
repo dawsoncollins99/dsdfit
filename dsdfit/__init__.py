@@ -2,7 +2,7 @@
 
 The functions you need:
 
-    Conditions(T, p, d_dry, H)                      physical conditions
+    Conditions(T, p, d_dry, H, alpha_c, alpha_T)    physical conditions
     welas_bins(cutoff_diameter=1.0)                 bin edges of the WELAS instrument
     Histogram(edges, counts)                        droplet counts in size bins
     load_histogram(path), save_histogram(h, path)   read / write histograms as CSV
@@ -22,6 +22,6 @@ from .fit import fit, FitResult
 from .compare import predicted_D_x
 from .plots import plot_fit
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = ["Conditions", "Histogram", "load_histogram", "save_histogram", "welas_bins",
            "model_fractions", "simulate", "fit", "FitResult", "predicted_D_x", "plot_fit"]

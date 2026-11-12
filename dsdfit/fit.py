@@ -148,10 +148,19 @@ def fit(hist, cond, start=None, tol=1e-8, max_iter=100):
         except np.linalg.LinAlgError:
             raise RuntimeError("fit: D_x and s_bar cannot be told apart for these data "
                                "(the information matrix is singular).") from None
-        if float(b @ step) < tol:                                   # predicted decrease of J
+        # a parameter sitting at its limit and being pushed past it stays put; solve for the other one
+        stuck = ((theta <= _LOW) & (step < 0)) | ((theta >= _HIGH) & (step > 0))
+        if stuck.any():
+            free = ~stuck
+            step = np.zeros(2)
+            if free.any():
+                step[free] = np.linalg.solve(A[np.ix_(free, free)], b[free])
+        predicted = float(b @ step)                                 # predicted decrease of J
+        if predicted < tol:
             converged = True
             break
-        step = np.clip(step, -_MAX_STEP, _MAX_STEP)
+        # shorten a step that is too long, keeping its direction (so it still goes downhill)
+        step = step * min(1.0, float(np.min(_MAX_STEP / np.maximum(np.abs(step), 1e-300))))
         J_now = _deviance(counts, n, p)
         t = 1.0
         while True:                                                 # halve the step until J goes down
@@ -160,8 +169,8 @@ def fit(hist, cond, start=None, tol=1e-8, max_iter=100):
             if J_trial < J_now or t < 1e-6:
                 break
             t /= 2
-        if t < 1e-6:
-            converged = float(b @ step) < 1e-3
+        if t < 1e-6:                    # no downhill step found: converged only if already at the bottom
+            converged = predicted < 1e-3
             break
         theta = trial
 
