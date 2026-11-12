@@ -1,7 +1,7 @@
 """Steady Fokker-Planck solver (internal).
 
-Most users never call this module directly: ``model_fractions``, ``simulate`` and
-``fit`` use it for you.
+Most users never call this module directly: ``model_fractions``, ``simulate``,
+``model_evolution`` and ``fit`` use it for you.
 
 The model, in y = (r + ell)^2 (um^2), where ell is the kinetic length from
 ``Conditions`` (ell = 0 by default, so y = r^2, radius squared):
@@ -146,6 +146,55 @@ class Model:
         rhs = np.zeros(self.n_cells)
         rhs[0] = 1.0
         return self.rc, solve_banded((1, 1), ab, rhs)
+
+    def evolve(self, D_x, s_bar, times, N0=None, injection=0.0, dt=0.5, return_density=False):
+        """Time-dependent solution (Steve Krueger's backward-Euler solver).
+
+        The steady system is A N = b. In time, each cell obeys dy dN/dt = b - A N, and
+        backward Euler gives (dy/dt + A) N_new = (dy/dt) N_old + b.
+
+        Parameters
+        ----------
+        times : increasing times [s] at which to report, all >= 0.
+        N0 : density on the grid at t = 0 (default: empty).
+        injection : particles per second entering at the smallest size.
+        dt : largest time step [s]; steps are shortened to land exactly on each time.
+        return_density : also return the density on the grid at each time.
+
+        Returns
+        -------
+        (numbers, total): numbers[i, k] is the number of droplets in bin k at times[i];
+        total[i] is the number of particles of any size in the chamber. With
+        return_density, a third array holds the density on the grid at each time.
+        """
+        self._check(D_x, s_bar)
+        times = np.asarray(times, float)
+        if np.any(times < 0) or np.any(np.diff(times) < 0):
+            raise ValueError("times must be increasing and not negative.")
+        if not dt > 0:
+            raise ValueError("dt must be positive.")
+        ab, _ = self._assemble(D_x, s_bar)
+        N = np.zeros(self.n_cells) if N0 is None else np.array(N0, float)
+        b = np.zeros(self.n_cells)
+        b[0] = injection
+        numbers, total = np.empty((len(times), self.n_bins)), np.empty(len(times))
+        density = np.empty((len(times), self.n_cells)) if return_density else None
+        t = 0.0
+        for i, t_next in enumerate(times):
+            gap = t_next - t
+            if gap > 0:
+                n_steps = int(np.ceil(gap / dt - 1e-9))
+                h = gap / n_steps
+                M = ab.copy()
+                M[1] += self.dy / h
+                for _ in range(n_steps):
+                    N = solve_banded((1, 1), M, (self.dy / h) * N + b, check_finite=False)
+                t = t_next
+            numbers[i] = self._bin(N)[:, 0]
+            total[i] = N.sum() * self.dy
+            if return_density:
+                density[i] = N
+        return (numbers, total, density) if return_density else (numbers, total)
 
     def fractions(self, D_x, s_bar):
         """Fraction of detected droplets expected in each bin."""

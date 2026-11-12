@@ -47,6 +47,7 @@ plot_fit(hist, result)
 | `load_histogram(path)`, `save_histogram(hist, path)` | read and write histograms as CSV |
 | `model_fractions(D_x, s_bar, cond, edges)` | the model's predicted fraction of droplets in each bin |
 | `simulate(D_x, s_bar, cond, edges, n, seed)` | a synthetic histogram of `n` droplets |
+| `model_evolution(D_x, s_bar, cond, edges, times, start)` | expected droplet numbers in each bin over time, after a pulse (`start="pulse"`) or from an empty chamber (`start="empty"`) |
 | `fit(hist, cond)` | estimates of `D_x` and `s_bar`, with error bars |
 | `predicted_D_x(sigma_s, tau, cond)` | `a² σ_s² τ`, to compare with a fitted `D_x` |
 | `plot_fit(hist, result)` | plot a histogram with the true and fitted model |

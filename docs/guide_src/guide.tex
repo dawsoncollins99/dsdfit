@@ -287,6 +287,7 @@ Function & What it does \\
 \code{load\_histogram(path)}, \code{save\_histogram(h, path)} & read and write histograms as CSV files \\
 \code{model\_fractions(D\_x, s\_bar, cond, edges)} & the model's predicted fraction of droplets in each bin \\
 \code{simulate(D\_x, s\_bar, cond, edges, n, seed)} & a synthetic histogram of \code{n} droplets \\
+\code{model\_evolution(D\_x, s\_bar, cond, edges, times)} & droplet numbers in each bin over time, after a pulse of aerosol or from an empty chamber \\
 \code{fit(hist, cond)} & estimates of $\Dx$ and $\sbar$ with error bars, as a \code{FitResult} \\
 \code{predicted\_D\_x(sigma\_s, tau, cond)} & $a^2\sigma_s^2\tau$, to compare with a fitted $\Dx$ \\
 \code{plot\_fit(hist, result)} & plot a histogram with the true and fitted model \\
