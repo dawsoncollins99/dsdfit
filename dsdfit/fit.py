@@ -159,18 +159,36 @@ def fit(hist, cond, start=None, tol=1e-8, max_iter=100):
         if predicted < tol:
             converged = True
             break
-        # shorten a step that is too long, keeping its direction (so it still goes downhill)
-        step = step * min(1.0, float(np.min(_MAX_STEP / np.maximum(np.abs(step), 1e-300))))
+        # cap each part of a step that is too long; if capping would turn the step uphill,
+        # shorten the whole step instead, keeping its direction
+        capped = np.clip(step, -_MAX_STEP, _MAX_STEP)
+        if float(b @ capped) > 0:
+            step = capped
+        else:
+            step = step * min(1.0, float(np.min(_MAX_STEP / np.maximum(np.abs(step), 1e-300))))
+        predicted_step = float(2.0 * b @ step - step @ A @ step)   # predicted decrease for this step
+        # how far to go along the step: try the full step, then the bottom of the parabola through
+        # J now, its slope along the step, and J at the full step; halve if J still does not go down
         J_now = _deviance(counts, n, p)
-        t = 1.0
-        while True:                                                 # halve the step until J goes down
+        slope = -2.0 * float(b @ step)                              # dJ/dt at t = 0 (downhill)
+
+        def J_at(t):
             trial = np.clip(theta + t * step, _LOW, _HIGH)
-            J_trial = _deviance(counts, n, model.fractions(math.exp(trial[0]), trial[1]))
-            if J_trial < J_now or t < 1e-6:
-                break
+            return trial, _deviance(counts, n, model.fractions(math.exp(trial[0]), trial[1]))
+
+        t = 1.0
+        trial, J_trial = J_at(t)
+        curvature = J_trial - J_now - slope
+        if curvature > 0 and -slope / (2.0 * curvature) < 1.0:
+            t_bottom = max(-slope / (2.0 * curvature), 1e-3)
+            trial_b, J_b = J_at(t_bottom)
+            if J_b < J_trial:
+                t, trial, J_trial = t_bottom, trial_b, J_b
+        while J_trial >= J_now and t >= 1e-6:
             t /= 2
-        if t < 1e-6:                    # no downhill step found: converged only if already at the bottom
-            converged = predicted < 1e-3
+            trial, J_trial = J_at(t)
+        if J_trial >= J_now:            # no downhill step found: converged only if already at the bottom
+            converged = predicted_step < 1e-3
             break
         theta = trial
 

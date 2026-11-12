@@ -493,8 +493,9 @@ n\,\Ical\,\Delta\theta = \sum_k \frac{c_k - n p_k}{p_k}\,\frac{\partial p_k}{\pa
 \qquad
 \Ical_{ij} = \sum_k \frac{1}{p_k}\,\frac{\partial p_k}{\partial\theta_i}\,\frac{\partial p_k}{\partial\theta_j},
 \end{equation}
-and moves to $\theta + \Delta\theta$, halving the step if $J$ does not go down (a very long step is first
-shortened, keeping its direction). This is the step that would
+and moves along $\Delta\theta$: it tries the full step and the bottom of a parabola fitted to $J$ along the
+step, keeps whichever gives the lower $J$, and halves the step if $J$ still does not go down (a very long
+step is capped first). $\Delta\theta$ is the step that would
 fit the current mismatch exactly if the model were linear near $\theta$. It usually converges in a handful
 of steps. The derivatives $\partial p_k/\partial\theta$ come from two more solves of the same tridiagonal
 system (the \emph{tangent-linear} method).
