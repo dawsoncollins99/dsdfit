@@ -6,7 +6,9 @@ Most users never call this module directly: ``model_fractions``, ``simulate``,
 The model, in y = (r + ell)^2 (um^2), where ell is the kinetic length from
 ``Conditions`` (ell = 0 by default, so y = r^2, radius squared):
 
-    d/dy [ v N - D_x dN/dy ] + k r^2 N = 0,      v = a (s_bar - A_k / r + B_k / r^3),   r = sqrt(y) - ell
+    d/dy [ v N - D_x dN/dy ] + k r^2 f(r) N = 0,      v = a (s_bar - A_k / r + B_k / r^3),   r = sqrt(y) - ell
+
+(f is the fallout factor from ``Conditions``, 1 by default)
 
 with droplets injected at the smallest size (flux F_in = 1) and no flux at the
 largest size. Working in y keeps the equation in the same form with the kinetic
@@ -92,6 +94,7 @@ class Model:
         self.dy = self.yf[1] - self.yf[0]
         self.yc = 0.5 * (self.yf[:-1] + self.yf[1:])                            # cell centers [um^2]
         self.rc = np.sqrt(self.yc) - ell                                          # cell-center radii [um]
+        self._fallout = cond.fallout_rate(self.rc) * self.dy                      # removal in each cell
 
         # which cells lie in which bin (cells cut by a bin edge are split by length)
         ye = (r_edges + ell)**2
@@ -108,7 +111,7 @@ class Model:
         Pe = v_face * self.dy / D_x                                         # cell Peclet number
         alpha = (D_x / self.dy) * _bern(-Pe)
         beta = -(D_x / self.dy) * _bern(Pe)
-        diag = c.k * self.rc**2 * self.dy                                   # fallout
+        diag = self._fallout.copy()                                         # fallout, k r^2 f(r)
         diag[:-1] += alpha
         diag[1:] -= beta
         ab = np.zeros((3, self.n_cells))

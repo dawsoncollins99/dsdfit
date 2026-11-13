@@ -1,5 +1,6 @@
+import numpy as np
 import pytest
-from dsdfit import Conditions, predicted_D_x
+from dsdfit import Conditions, predicted_D_x, model_fractions, welas_bins
 
 
 def test_defaults_match_matlab_constants():
@@ -16,10 +17,47 @@ def test_fallout_scales_with_height():
 
 
 @pytest.mark.parametrize("bad", [dict(T=-1.0), dict(p=0.0), dict(d_dry=-0.1), dict(H=float("nan")), dict(T=400.0),
-                                 dict(alpha_c=0.0), dict(alpha_c=1.5), dict(alpha_c=0.04, alpha_T=0.0)])
+                                 dict(alpha_c=0.0), dict(alpha_c=1.5), dict(alpha_c=0.04, alpha_T=0.0),
+                                 dict(fallout_factor=0.0), dict(fallout_factor=-1.0),
+                                 dict(fallout_factor=float("nan")), dict(fallout_factor="fast")])
 def test_bad_inputs_raise(bad):
     with pytest.raises(ValueError):
         Conditions(**bad)
+
+
+def test_default_fallout_rate_is_k_r_squared():
+    c = Conditions()
+    r = np.array([1.0, 5.0, 12.0])
+    assert np.allclose(c.fallout_rate(r), c.k * r**2)
+
+
+def test_constant_fallout_factor_is_like_a_shorter_chamber():
+    """Doubling the fallout rate at every size is the same as halving the chamber height."""
+    edges = welas_bins()
+    p_factor = model_fractions(0.3, 0.0009, Conditions(fallout_factor=2.0), edges)
+    p_short = model_fractions(0.3, 0.0009, Conditions(H=0.5), edges)
+    assert np.allclose(p_factor, p_short, rtol=1e-10, atol=0)
+
+
+def test_fallout_factor_number_and_function_agree():
+    edges = welas_bins()
+    p_number = model_fractions(0.3, 0.0009, Conditions(fallout_factor=1.3), edges)
+    p_function = model_fractions(0.3, 0.0009, Conditions(fallout_factor=lambda r: 1.3), edges)
+    assert np.array_equal(p_number, p_function)
+
+
+def test_size_dependent_fallout_removes_big_droplets():
+    """Faster fallout for big droplets leaves relatively fewer of them."""
+    edges = welas_bins()
+    p_plain = model_fractions(0.3, 0.0009, Conditions(), edges)
+    p_fast = model_fractions(0.3, 0.0009, Conditions(fallout_factor=lambda r: 1 + 0.01 * r**2), edges)
+    mid = 0.5 * (edges[:-1] + edges[1:])
+    assert np.sum(mid * p_fast) < np.sum(mid * p_plain)
+
+
+def test_fallout_factor_must_be_positive_at_every_size():
+    with pytest.raises(ValueError):
+        model_fractions(0.3, 0.0009, Conditions(fallout_factor=lambda r: 1 - 0.01 * r**2), welas_bins())
 
 
 def test_predicted_D_x():

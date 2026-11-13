@@ -5,11 +5,11 @@ from dsdfit import Conditions, welas_bins, model_evolution
 import dsdfit.solver as solver
 
 
-@pytest.mark.parametrize("alpha_c", [None, 0.04])
-def test_pulse_summed_over_time_equals_steady(alpha_c):
+@pytest.mark.parametrize("alpha_c,fallout_factor", [(None, 1.0), (0.04, 1.0), (0.04, 1.3)])
+def test_pulse_summed_over_time_equals_steady(alpha_c, fallout_factor):
     """A pulse of one particle, summed over all time, is the steady solution for one particle per second.
     With backward Euler this holds exactly, for any time step."""
-    cond, edges = Conditions(alpha_c=alpha_c), welas_bins()
+    cond, edges = Conditions(alpha_c=alpha_c, fallout_factor=fallout_factor), welas_bins()
     dt = 10.0
     times = np.arange(dt, 4000.0 + dt / 2, dt)
     numbers, total = model_evolution(0.3, 0.003, cond, edges, times, start="pulse", dt=dt)

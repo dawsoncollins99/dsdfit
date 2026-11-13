@@ -13,13 +13,17 @@ Optionally, two accommodation coefficients (alpha_c, alpha_T) add a fifth consta
 
     ell  kinetic length          [um]          small droplets grow more slowly, by a factor r / (r + ell)
 
+and a fallout factor f changes the fallout rate to k * r^2 * f(r) (droplets are
+removed faster than k * r^2 if, for example, they crowd toward the floor).
+
 The formulas follow Steve Krueger's MATLAB solver (xi1_func.m, esat_Pa.m and the
 benchmark script); the kinetic length follows Fukuta and Walter (1970), as in
 C-ODT. The aerosol is sodium chloride (NaCl).
 """
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional, Union
 import math
+import numpy as np
 
 # fixed physical constants (SI units)
 RHO_W = 1000.0        # density of liquid water [kg/m^3]
@@ -68,15 +72,25 @@ class Conditions:
     alpha_T : float
         Thermal accommodation coefficient (0 < alpha_T <= 1). Only used when alpha_c
         is given. Default 1, as in C-ODT.
+    fallout_factor : float, or a function of radius
+        Multiplies the fallout rate: droplets of radius r [um] are removed at rate
+        k * r^2 * fallout_factor. Default 1, which assumes droplets are spread evenly
+        in height. Give a number for the same change at every size, or a function of r
+        for a change that depends on size (for example ``lambda r: 1 + 0.005 * r**2``).
+        Values above 1 mean droplets are removed faster, for example because they
+        crowd toward the floor.
 
     The model constants are available as ``cond.a``, ``cond.A_k``, ``cond.B_k``, ``cond.k``
-    and ``cond.ell``. Use ``print(cond)`` to see all of them.
+    and ``cond.ell``, and ``cond.fallout_rate(r)`` gives the fallout rate [1/s].
+    Use ``print(cond)`` to see all of them.
 
     Examples
     --------
     >>> cond = Conditions()                  # defaults (no kinetic correction)
     >>> cond = Conditions(T=285.0, H=1.2)    # change any of the inputs
     >>> cond = Conditions(alpha_c=0.04)      # include the kinetic correction, as in C-ODT
+    >>> cond = Conditions(fallout_factor=1.3)                        # 30% faster fallout at every size
+    >>> cond = Conditions(fallout_factor=lambda r: 1 + 0.005 * r**2)  # faster for bigger droplets
     """
     T: float = 288.0
     p: float = 1.0e5
@@ -84,6 +98,7 @@ class Conditions:
     H: float = 1.0
     alpha_c: Optional[float] = None
     alpha_T: float = 1.0
+    fallout_factor: Union[float, Callable] = 1.0
 
     def __post_init__(self):
         for name in ("T", "p", "d_dry", "H"):
@@ -99,6 +114,10 @@ class Conditions:
                 continue
             if not (isinstance(value, (int, float)) and math.isfinite(value) and 0 < value <= 1):
                 raise ValueError(f"Conditions: {name} must be a number between 0 and 1 (got {value!r}).")
+        f = self.fallout_factor
+        if not callable(f) and not (isinstance(f, (int, float)) and math.isfinite(f) and f > 0):
+            raise ValueError("Conditions: fallout_factor must be a positive number or a function of "
+                             f"radius (got {f!r}).")
 
     # ------------------------------------------------------------------ air properties
     def _conductivity(self):
@@ -160,6 +179,16 @@ class Conditions:
         stokes = 2.0 * (RHO_W - rho_air) * G / (9.0 * MU_AIR)  # fall speed / r^2 [1/(m s)]
         return stokes / self.H * 1e-12
 
+    def fallout_rate(self, r):
+        """Rate [1/s] at which droplets of radius r [um] fall out: k * r^2 * fallout_factor."""
+        r = np.asarray(r, float)
+        f = self.fallout_factor
+        factor = np.broadcast_to(np.asarray(f(r) if callable(f) else f, float), r.shape)
+        if not np.all(np.isfinite(factor) & (factor > 0)):
+            raise ValueError("Conditions: fallout_factor must be positive at every droplet size "
+                             f"(it is not between r = {r.min():.3g} and {r.max():.3g} um).")
+        return self.k * r**2 * factor
+
     @property
     def critical_radius(self):
         """Radius [um] a droplet must pass to keep growing at the critical supersaturation."""
@@ -175,6 +204,15 @@ class Conditions:
             accommodation = ["  accommodation: none given (no kinetic correction)"]
         else:
             accommodation = [f"  accommodation alpha_c = {self.alpha_c:g}, alpha_T = {self.alpha_T:g}"]
+        f = self.fallout_factor
+        if callable(f):
+            try:
+                example = f" ({float(np.asarray(f(np.array(5.0)))):.3g} at r = 5 um)"
+            except Exception:
+                example = ""
+            fallout = [f"  fallout factor = a function of r{example}"]
+        else:
+            fallout = [f"  fallout factor = {f:g}"]
         return "\n".join([
             "Conditions",
             f"  temperature  T     = {self.T:g} K",
@@ -182,6 +220,7 @@ class Conditions:
             f"  dry diameter d_dry = {self.d_dry:g} um",
             f"  chamber      H     = {self.H:g} m",
             *accommodation,
+            *fallout,
             "Model constants",
             f"  growth       a     = {self.a:.4g} um^2/s",
             f"  curvature    A_k   = {self.A_k:.4g} um",

@@ -19,6 +19,23 @@ def test_recovery_best_case(alpha_c):
     assert abs(zD.mean()) < 1.5 and abs(zS.mean()) < 1.5            # no systematic offset
 
 
+def test_recovery_with_size_dependent_fallout():
+    """Data made with faster fallout for big droplets, fitted with the same fallout: the truth is recovered.
+    Fitted with plain k r^2 fallout instead, s_bar comes out too low."""
+    cond = Conditions(alpha_c=0.04, fallout_factor=lambda r: 1 + 0.005 * r**2)
+    edges = welas_bins(2.0)
+    zD, zS, s_plain = [], [], []
+    for seed in range(5):
+        h = simulate(0.3, 0.0009, cond, edges, n=10**5, seed=seed)
+        r = fit(h, cond)
+        assert r.converged
+        zD.append((r.D_x - 0.3) / r.D_x_err)
+        zS.append((r.s_bar - 0.0009) / r.s_bar_err)
+        s_plain.append(fit(h, Conditions(alpha_c=0.04)).s_bar)
+    assert np.all(np.abs(zD) < 4) and np.all(np.abs(zS) < 4)
+    assert np.all(np.array(s_plain) < 0.0009)
+
+
 def test_fit_check_flags_wrong_physics():
     """Fitting with a badly wrong chamber height should fail the fit check at large n."""
     edges = welas_bins()
