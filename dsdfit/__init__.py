@@ -24,6 +24,6 @@ from .fit import fit, FitResult
 from .compare import predicted_D_x
 from .plots import plot_fit
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 __all__ = ["Conditions", "Histogram", "load_histogram", "save_histogram", "welas_bins",
            "model_fractions", "simulate", "model_evolution", "fit", "FitResult", "predicted_D_x", "plot_fit"]

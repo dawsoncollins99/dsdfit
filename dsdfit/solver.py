@@ -150,11 +150,21 @@ class Model:
         rhs[0] = 1.0
         return self.rc, solve_banded((1, 1), ab, rhs)
 
-    def evolve(self, D_x, s_bar, times, N0=None, injection=0.0, dt=0.5, return_density=False):
-        """Time-dependent solution (Steve Krueger's backward-Euler solver).
+    def evolve(self, D_x, s_bar, times, N0=None, injection=0.0, dt=0.5, return_density=False,
+               scheme="trbdf2"):
+        """Time-dependent solution.
 
-        The steady system is A N = b. In time, each cell obeys dy dN/dt = b - A N, and
-        backward Euler gives (dy/dt + A) N_new = (dy/dt) N_old + b.
+        The steady system is A N = b. In time, each cell obeys dy dN/dt = b - A N.
+
+        scheme="trbdf2" (default): the TR-BDF2 method, second order in time and strongly
+        damping (L-stable), so a sharp pulse does not ring. One step of length h is a
+        trapezoidal step to t + g h followed by a BDF2 step to t + h, with g = 2 - sqrt(2).
+
+        scheme="backward_euler": Steve Krueger's original first-order scheme,
+        (dy/h + A) N_new = (dy/h) N_old + b. It adds an artificial spreading of about
+        v^2 h / 2, where v is the growth rate in y (about 0.1 um^4/s at h = 0.5 s and
+        s_bar = 0.3%), so pulses need much smaller steps with it. Kept for comparison
+        with his solver.
 
         Parameters
         ----------
@@ -163,6 +173,7 @@ class Model:
         injection : particles per second entering at the smallest size.
         dt : largest time step [s]; steps are shortened to land exactly on each time.
         return_density : also return the density on the grid at each time.
+        scheme : "trbdf2" (default) or "backward_euler".
 
         Returns
         -------
@@ -176,22 +187,38 @@ class Model:
             raise ValueError("times must be increasing and not negative.")
         if not dt > 0:
             raise ValueError("dt must be positive.")
+        if scheme not in ("trbdf2", "backward_euler"):
+            raise ValueError('scheme must be "trbdf2" or "backward_euler".')
         ab, _ = self._assemble(D_x, s_bar)
         N = np.zeros(self.n_cells) if N0 is None else np.array(N0, float)
         b = np.zeros(self.n_cells)
         b[0] = injection
         numbers, total = np.empty((len(times), self.n_bins)), np.empty(len(times))
         density = np.empty((len(times), self.n_cells)) if return_density else None
+        dy, g = self.dy, 2.0 - np.sqrt(2.0)
         t = 0.0
         for i, t_next in enumerate(times):
             gap = t_next - t
             if gap > 0:
                 n_steps = int(np.ceil(gap / dt - 1e-9))
                 h = gap / n_steps
-                M = ab.copy()
-                M[1] += self.dy / h
-                for _ in range(n_steps):
-                    N = solve_banded((1, 1), M, (self.dy / h) * N + b, check_finite=False)
+                if scheme == "backward_euler":
+                    M = ab.copy()
+                    M[1] += dy / h
+                    for _ in range(n_steps):
+                        N = solve_banded((1, 1), M, (dy / h) * N + b, check_finite=False)
+                else:
+                    M1 = 0.5 * ab                            # dy/(g h) + A/2
+                    M1[1] += dy / (g * h)
+                    M2 = (1.0 - g) * h * ab                  # (2 - g) dy + (1 - g) h A
+                    M2[1] += (2.0 - g) * dy
+                    for _ in range(n_steps):
+                        AN = ab[1] * N
+                        AN[:-1] += ab[0, 1:] * N[1:]
+                        AN[1:] += ab[2, :-1] * N[:-1]
+                        N_mid = solve_banded((1, 1), M1, (dy / (g * h)) * N - 0.5 * AN + b, check_finite=False)
+                        N = solve_banded((1, 1), M2, dy * (N_mid / g - ((1.0 - g) ** 2 / g) * N) + (1.0 - g) * h * b,
+                                         check_finite=False)
                 t = t_next
             numbers[i] = self._bin(N)[:, 0]
             total[i] = N.sum() * self.dy

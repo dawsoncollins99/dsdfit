@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dsdfit"
-version = "0.3.0"
+version = "0.3.1"
 description = "Estimate D_x and the mean supersaturation from droplet size histograms with a steady Fokker-Planck model"
 readme = "README.md"
 license = {text = "MIT"}
